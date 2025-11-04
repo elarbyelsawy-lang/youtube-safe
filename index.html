@@ -66,8 +66,16 @@
         const CONFIG = {
             API_KEY: 'AIzaSyAVDAdDLw-HyGVptvHo7KLAtljP7Lv9HWM',
             ALLOWED_CHANNELS: [
-                'UC1FECopYxeTtlWMgDBYQNlg',
-                'UCburSfYTmzMbLJnLlqsuQvw'
+                'UCN6hQCg6tIs5x6CoYLwXlhQ',
+                'UCMmiGP6imlrwLP3oy34wbxA',
+                'UCdur25RCItdfoXA89ORWSkw',
+                'UCGLqLYzjWYuPTUhC9QireWg',
+                'UClvucpj2qZ3OUM2not9YVpA',
+                'UCwbUIqOxivtwVkSA8Cm87aA',
+                'UCYTe2pbx_83PMClEm7JZQCA',
+                'UChGiPYEm5gLRwFmKPVrk-_Q',
+                'UCOKKttQBUqmenmwur2a57Jg',
+                'UCSvnSxC5f1W8ogXMC38IbzA'
             ],
             MAX_VIDEOS_PER_CHANNEL: 10
         };
@@ -76,14 +84,8 @@
         let filteredVideos = [];
 
         window.addEventListener('DOMContentLoaded', () => {
-            if (!CONFIG.API_KEY) {
-                showError('⚠️ خطأ: يجب وضع API Key في الكود!');
-                return;
-            }
-            if (CONFIG.ALLOWED_CHANNELS.length === 0) {
-                showError('⚠️ خطأ: يجب إضافة Channel IDs الحقيقية!');
-                return;
-            }
+            if (!CONFIG.API_KEY) { showError('⚠️ خطأ: يجب وضع API Key في الكود!'); return; }
+            if (CONFIG.ALLOWED_CHANNELS.length === 0) { showError('⚠️ خطأ: يجب إضافة Channel IDs الحقيقية!'); return; }
             loadAllVideos();
         });
 
@@ -105,11 +107,8 @@
                 allVideos.sort((a,b)=> new Date(b.publishedAt)-new Date(a.publishedAt));
                 filteredVideos = [...allVideos];
                 displayVideos(filteredVideos);
-            } catch(err) {
-                showError(`❌ خطأ في التحميل: ${err.message}`);
-            } finally {
-                document.getElementById('loadingContainer').style.display='none';
-            }
+            } catch(err) { showError(`❌ خطأ في التحميل: ${err.message}`); } 
+            finally { document.getElementById('loadingContainer').style.display='none'; }
         }
 
         async function fetchChannelVideos(channelId) {
