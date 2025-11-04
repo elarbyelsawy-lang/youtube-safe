@@ -15,6 +15,7 @@
         #searchInput { width:100%; max-width:600px; padding:15px 20px; font-size:1.1em; border:none; border-radius:50px; background: rgba(255,255,255,0.95); color:#333; outline:none; box-shadow:0 4px 15px rgba(0,0,0,0.2); }
         #searchInput::placeholder { color:#999; }
         .loading { text-align:center; font-size:1.3em; padding:40px; background: rgba(255,255,255,0.1); border-radius:15px; margin:20px 0; }
+        .loading-progress { margin-top:15px; font-size:0.9em; opacity:0.8; }
         .error { background: rgba(255,59,48,0.2); border:2px solid #ff3b30; padding:20px; border-radius:15px; text-align:center; margin:20px 0; }
         .videos-grid { display:grid; grid-template-columns: repeat(auto-fill,minmax(320px,1fr)); gap:25px; margin-top:30px; }
         .video-card { background: rgba(255,255,255,0.1); border-radius:15px; overflow:hidden; transition: transform 0.3s, box-shadow 0.3s; backdrop-filter:blur(10px); }
@@ -50,7 +51,10 @@
         </div>
 
         <div id="statsContainer" class="stats"></div>
-        <div id="loadingContainer" class="loading">⏳ جارٍ تحميل الفيديوهات...</div>
+        <div id="loadingContainer" class="loading">
+            ⏳ جارٍ تحميل الفيديوهات...
+            <div class="loading-progress" id="loadingProgress"></div>
+        </div>
         <div id="errorContainer"></div>
         <div id="videosContainer" class="videos-grid"></div>
     </div>
@@ -63,6 +67,7 @@
     </div>
 
     <script>
+        // ⚙️ الإعدادات - عدّل هنا!
         const CONFIG = {
             API_KEY: 'AIzaSyAVDAdDLw-HyGVptvHo7KLAtljP7Lv9HWM',
             ALLOWED_CHANNELS: [
@@ -77,7 +82,8 @@
                 'UCOKKttQBUqmenmwur2a57Jg',
                 'UCSvnSxC5f1W8ogXMC38IbzA'
             ],
-            MAX_VIDEOS_PER_CHANNEL: 10
+            // عدد الفيديوهات من كل قناة (50 أو 100 أو 150 أو 200)
+            MAX_VIDEOS_PER_CHANNEL: 200
         };
 
         let allVideos = [];
@@ -101,41 +107,117 @@
             allVideos = [];
 
             try {
-                const results = await Promise.all(CONFIG.ALLOWED_CHANNELS.map(fetchChannelVideos));
-                results.forEach(videos => { if(videos.length>0) allVideos.push(...videos); });
-                if(allVideos.length===0) { showError('❌ لم يتم العثور على فيديوهات!'); return; }
+                // جلب الفيديوهات من كل قناة واحدة تلو الأخرى مع عرض التقدم
+                for (let i = 0; i < CONFIG.ALLOWED_CHANNELS.length; i++) {
+                    const channelId = CONFIG.ALLOWED_CHANNELS[i];
+                    updateLoadingProgress(i + 1, CONFIG.ALLOWED_CHANNELS.length);
+                    
+                    const videos = await fetchChannelVideos(channelId);
+                    if (videos.length > 0) {
+                        allVideos.push(...videos);
+                    }
+                }
+
+                if(allVideos.length === 0) { 
+                    showError('❌ لم يتم العثور على فيديوهات!<br>تأكد من:<br>1. صحة Channel IDs<br>2. تفعيل YouTube Data API<br>3. صلاحيات API Key'); 
+                    return; 
+                }
+                
                 allVideos.sort((a,b)=> new Date(b.publishedAt)-new Date(a.publishedAt));
                 filteredVideos = [...allVideos];
                 displayVideos(filteredVideos);
-            } catch(err) { showError(`❌ خطأ في التحميل: ${err.message}`); } 
-            finally { document.getElementById('loadingContainer').style.display='none'; }
+            } catch(err) { 
+                showError(`❌ خطأ في التحميل: ${err.message}`); 
+            } finally { 
+                document.getElementById('loadingContainer').style.display='none'; 
+            }
         }
 
+        function updateLoadingProgress(current, total) {
+            const progressEl = document.getElementById('loadingProgress');
+            progressEl.textContent = `جارٍ تحميل القناة ${current} من ${total}... (تم جلب ${allVideos.length} فيديو حتى الآن)`;
+        }
+
+        // 🔄 دالة محسّنة لجلب فيديوهات القناة مع Pagination
         async function fetchChannelVideos(channelId) {
-            const url = `https://www.googleapis.com/youtube/v3/search?key=${CONFIG.API_KEY}&channelId=${channelId}&part=snippet&order=date&maxResults=${CONFIG.MAX_VIDEOS_PER_CHANNEL}&type=video`;
+            const videosPerRequest = 50; // الحد الأقصى من YouTube
+            const totalVideosNeeded = CONFIG.MAX_VIDEOS_PER_CHANNEL;
+            const requestsNeeded = Math.ceil(totalVideosNeeded / videosPerRequest);
+            
+            let allChannelVideos = [];
+            let nextPageToken = null;
+
             try {
-                const response = await fetch(url);
-                if(!response.ok){ const errorData=await response.json(); console.error(`خطأ في القناة ${channelId}:`,errorData); return []; }
-                const data = await response.json();
-                return data.items.map(item=>({
-                    id:item.id.videoId,
-                    title:item.snippet.title,
-                    channelTitle:item.snippet.channelTitle,
-                    thumbnail:item.snippet.thumbnails.medium.url,
-                    publishedAt:item.snippet.publishedAt
-                }));
-            } catch(err){ console.error(`خطأ في جلب بيانات القناة ${channelId}:`,err); return []; }
+                // عمل عدة طلبات للحصول على العدد المطلوب
+                for (let i = 0; i < requestsNeeded; i++) {
+                    const url = `https://www.googleapis.com/youtube/v3/search?key=${CONFIG.API_KEY}&channelId=${channelId}&part=snippet&order=date&maxResults=${videosPerRequest}&type=video${nextPageToken ? '&pageToken=' + nextPageToken : ''}`;
+                    
+                    const response = await fetch(url);
+                    
+                    if(!response.ok) { 
+                        const errorData = await response.json(); 
+                        console.error(`خطأ في القناة ${channelId}:`, errorData); 
+                        break;
+                    }
+                    
+                    const data = await response.json();
+                    
+                    const videos = data.items.map(item => ({
+                        id: item.id.videoId,
+                        title: item.snippet.title,
+                        channelTitle: item.snippet.channelTitle,
+                        thumbnail: item.snippet.thumbnails.medium.url,
+                        publishedAt: item.snippet.publishedAt
+                    }));
+                    
+                    allChannelVideos.push(...videos);
+                    
+                    // إذا لم يكن هناك صفحة تالية، نوقف الحلقة
+                    if (!data.nextPageToken) {
+                        break;
+                    }
+                    
+                    nextPageToken = data.nextPageToken;
+                    
+                    // إذا وصلنا للعدد المطلوب، نوقف
+                    if (allChannelVideos.length >= totalVideosNeeded) {
+                        break;
+                    }
+
+                    // إضافة تأخير صغير بين الطلبات لتجنب Rate Limiting
+                    await sleep(100);
+                }
+
+                // قص القائمة للعدد المطلوب بالضبط
+                return allChannelVideos.slice(0, totalVideosNeeded);
+
+            } catch(err) { 
+                console.error(`خطأ في جلب بيانات القناة ${channelId}:`, err); 
+                return []; 
+            }
+        }
+
+        // دالة مساعدة للتأخير
+        function sleep(ms) {
+            return new Promise(resolve => setTimeout(resolve, ms));
         }
 
         function displayVideos(videos){
-            const container=document.getElementById('videosContainer');
-            const statsContainer=document.getElementById('statsContainer');
-            if(videos.length===0){ container.innerHTML='<div class="error">😕 لا توجد نتائج للبحث</div>'; statsContainer.innerHTML=''; return; }
-            statsContainer.innerHTML=`📹 عدد الفيديوهات المتاحة: <strong>${videos.length}</strong>`;
-            container.innerHTML = videos.map(v=>`
+            const container = document.getElementById('videosContainer');
+            const statsContainer = document.getElementById('statsContainer');
+            
+            if(videos.length === 0) { 
+                container.innerHTML = '<div class="error">😕 لا توجد نتائج للبحث</div>'; 
+                statsContainer.innerHTML = ''; 
+                return; 
+            }
+            
+            statsContainer.innerHTML = `📹 عدد الفيديوهات المتاحة: <strong>${videos.length}</strong> فيديو من <strong>${CONFIG.ALLOWED_CHANNELS.length}</strong> قناة`;
+            
+            container.innerHTML = videos.map(v => `
                 <div class="video-card">
                     <div class="video-thumbnail" onclick="playVideo('${v.id}')">
-                        <img src="${v.thumbnail}" alt="${v.title}">
+                        <img src="${v.thumbnail}" alt="${v.title}" loading="lazy">
                         <div class="play-button"></div>
                     </div>
                     <div class="video-info">
@@ -148,32 +230,40 @@
         }
 
         function playVideo(videoId){
-            const player=document.getElementById('videoPlayer');
-            const frame=document.getElementById('playerFrame');
-            frame.src=`https://www.youtube-nocookie.com/embed/${videoId}?autoplay=1&rel=0`;
+            const player = document.getElementById('videoPlayer');
+            const frame = document.getElementById('playerFrame');
+            frame.src = `https://www.youtube-nocookie.com/embed/${videoId}?autoplay=1&rel=0`;
             player.classList.add('active');
-            document.body.style.overflow='hidden';
+            document.body.style.overflow = 'hidden';
         }
 
         function closeVideo(){
-            const player=document.getElementById('videoPlayer');
-            const frame=document.getElementById('playerFrame');
-            frame.src='';
+            const player = document.getElementById('videoPlayer');
+            const frame = document.getElementById('playerFrame');
+            frame.src = '';
             player.classList.remove('active');
-            document.body.style.overflow='auto';
+            document.body.style.overflow = 'auto';
         }
 
-        document.addEventListener('keydown',(e)=>{ if(e.key==='Escape') closeVideo(); });
-        function showError(message){ document.getElementById('errorContainer').innerHTML=`<div class="error">${message}</div>`; document.getElementById('loadingContainer').style.display='none'; }
+        document.addEventListener('keydown', (e) => { if(e.key === 'Escape') closeVideo(); });
+        
+        function showError(message) { 
+            document.getElementById('errorContainer').innerHTML = `<div class="error">${message}</div>`; 
+            document.getElementById('loadingContainer').style.display = 'none'; 
+        }
 
         function formatDate(dateString){
-            const date=new Date(dateString), now=new Date(), diffTime=Math.abs(now-date), diffDays=Math.ceil(diffTime/(1000*60*60*24));
-            if(diffDays===0) return 'اليوم';
-            if(diffDays===1) return 'أمس';
-            if(diffDays<7) return `منذ ${diffDays} أيام`;
-            if(diffDays<30) return `منذ ${Math.floor(diffDays/7)} أسابيع`;
-            if(diffDays<365) return `منذ ${Math.floor(diffDays/30)} أشهر`;
-            return `منذ ${Math.floor(diffDays/365)} سنة`;
+            const date = new Date(dateString);
+            const now = new Date();
+            const diffTime = Math.abs(now - date);
+            const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+            
+            if(diffDays === 0) return 'اليوم';
+            if(diffDays === 1) return 'أمس';
+            if(diffDays < 7) return `منذ ${diffDays} أيام`;
+            if(diffDays < 30) return `منذ ${Math.floor(diffDays / 7)} أسابيع`;
+            if(diffDays < 365) return `منذ ${Math.floor(diffDays / 30)} أشهر`;
+            return `منذ ${Math.floor(diffDays / 365)} سنة`;
         }
     </script>
 </body>
